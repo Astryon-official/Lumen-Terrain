@@ -1,17 +1,24 @@
 #include "HardwareManager.h"
-#include "OpenCLManager.h"
+#include "DeviceRuntime.h"
 #include "Logger.h"
 
 #include <algorithm>
-#include <filesystem>
-#include <fstream>
-#include <map>
-#include <set>
-#include <sstream>
 #include <string>
 #include <thread>
-#include <unordered_map>
 #include <vector>
+
+/*
+ * Hardware detection (LTE 2.0.0)
+ *
+ * Platform notes:
+ *   - Windows: CPU identity via cpuid (brand string); topology via
+ *     std::thread::hardware_concurrency(). No /proc or /sys usage.
+ *   - Linux: /proc/cpuinfo first, sysfs fallback, then the portable
+ *     hardware_concurrency fallback.
+ *
+ * GPU data comes from OpenCLManager after LTE::Initialize(); this class
+ * never initializes OpenCL itself.
+ */
 
 namespace LTE
 {
@@ -19,22 +26,91 @@ namespace LTE
 namespace
 {
 
-struct LinuxCPURecord
-{
-    unsigned int processor = 0;
-    unsigned int physicalPackage = 0;
-    unsigned int coreId = 0;
-    std::string modelName;
-};
+#if defined(_WIN32)
 
-
-/*
- * Read a small text file.
- */
-bool ReadTextFile(
-    const std::string& path,
-    std::string& value
+void CpuId(
+    int function,
+    int subLeaf,
+    int regs[4]
 )
+{
+    __cpuid(reinterpret_cast<int*>(regs), function);
+}
+
+
+std::string DetectCPUNameWindows()
+{
+    int regs[4];
+
+    /*
+     * Brand string: 3 leaves of 16 bytes = 48 characters.
+     */
+    char brand[49] = {};
+
+    for (int i = 0; i < 3; ++i)
+    {
+        CpuId(0x80000002 + i, 0, regs);
+
+        for (int r = 0; r < 4; ++r)
+        {
+            const int base = i * 16 + r * 4;
+
+            brand[base + 0] = static_cast<char>((regs[r] >> 0) & 0xFF);
+            brand[base + 1] = static_cast<char>((regs[r] >> 8) & 0xFF);
+            brand[base + 2] = static_cast<char>((regs[r] >> 16) & 0xFF);
+            brand[base + 3] = static_cast<char>((regs[r] >> 24) & 0xFF);
+        }
+    }
+
+    brand[48] = '\0';
+
+    std::string value(brand);
+
+    /*
+     * Trim leading/trailing whitespace; collapse internal runs.
+     */
+    const auto notSpace =
+        [](unsigned char c)
+        {
+            return c != ' ';
+        };
+
+    value.erase(value.begin(),
+        std::find_if(value.begin(), value.end(), notSpace));
+
+    value.erase(
+        std::find_if(value.rbegin(), value.rend(), notSpace).base(),
+        value.end());
+
+    std::string collapsed;
+
+    bool previousSpace = false;
+
+    for (char c : value)
+    {
+        if (c == ' ')
+        {
+            if (previousSpace)
+            {
+                continue;
+            }
+
+            previousSpace = true;
+        }
+        else
+        {
+            previousSpace = false;
+        }
+
+        collapsed.push_back(c);
+    }
+
+    return collapsed.empty() ? "Unknown CPU" : collapsed;
+}
+
+#else
+
+bool ReadTextFile(const std::string& path, std::string& value)
 {
     std::ifstream file(path);
 
@@ -48,17 +124,13 @@ bool ReadTextFile(
     return !value.empty();
 }
 
-
-/*
- * Try to determine the CPU model without relying exclusively
- * on /proc/cpuinfo.
- */
-std::string DetectCPUName()
+std::string DetectCPUNameLinux()
 {
     std::string value;
 
     /*
-     * sysfs CPU model.
+     * DMI product name is a reasonable machine identifier when
+     * cpuinfo is unavailable.
      */
     if (ReadTextFile(
             "/sys/devices/virtual/dmi/id/product_name",
@@ -72,20 +144,6 @@ std::string DetectCPUName()
     }
 
 
-    /*
-     * Intel-specific fallback.
-     */
-    if (ReadTextFile(
-            "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_cur_freq",
-            value))
-    {
-        // Frequency is not a model name, so don't use it.
-    }
-
-
-    /*
-     * Last attempt: /proc/cpuinfo.
-     */
     std::ifstream file("/proc/cpuinfo");
 
     if (file.is_open())
@@ -101,19 +159,14 @@ std::string DetectCPUName()
                 continue;
             }
 
-            const std::string key =
-                line.substr(0, separator);
-
-            if (key != "model name")
+            if (line.substr(0, separator) != "model name")
             {
                 continue;
             }
 
-            value =
-                line.substr(separator + 1);
+            value = line.substr(separator + 1);
 
-            while (!value.empty() &&
-                   value.front() == ' ')
+            while (!value.empty() && value.front() == ' ')
             {
                 value.erase(value.begin());
             }
@@ -129,576 +182,309 @@ std::string DetectCPUName()
     return "Unknown CPU";
 }
 
+#endif
 
-/*
- * Read Linux CPU topology from /proc/cpuinfo when available.
- */
-bool ReadCPUInfo(
-    std::vector<LinuxCPURecord>& records
-)
+
+std::string DetectCPUName()
 {
-    std::ifstream file("/proc/cpuinfo");
-
-    if (!file.is_open())
-    {
-        return false;
-    }
-
-    LinuxCPURecord current;
-    bool hasProcessor = false;
-
-    std::string line;
-
-    auto commitRecord = [&]()
-    {
-        if (hasProcessor)
-        {
-            records.push_back(current);
-        }
-
-        current = LinuxCPURecord{};
-        hasProcessor = false;
-    };
-
-
-    while (std::getline(file, line))
-    {
-        if (line.empty())
-        {
-            commitRecord();
-            continue;
-        }
-
-        const auto separator = line.find(':');
-
-        if (separator == std::string::npos)
-        {
-            continue;
-        }
-
-        const std::string key =
-            line.substr(0, separator);
-
-        std::string value =
-            line.substr(separator + 1);
-
-
-        while (!value.empty() &&
-               value.front() == ' ')
-        {
-            value.erase(value.begin());
-        }
-
-
-        if (key == "processor")
-        {
-            current.processor =
-                static_cast<unsigned int>(
-                    std::stoul(value)
-                );
-
-            hasProcessor = true;
-        }
-        else if (key == "physical id")
-        {
-            current.physicalPackage =
-                static_cast<unsigned int>(
-                    std::stoul(value)
-                );
-        }
-        else if (key == "core id")
-        {
-            current.coreId =
-                static_cast<unsigned int>(
-                    std::stoul(value)
-                );
-        }
-        else if (key == "model name")
-        {
-            current.modelName = value;
-        }
-    }
-
-
-    commitRecord();
-
-    return !records.empty();
+#if defined(_WIN32)
+    return DetectCPUNameWindows();
+#else
+    return DetectCPUNameLinux();
+#endif
 }
 
 
-/*
- * Linux fallback topology using sysfs.
- *
- * This does not depend on /proc/cpuinfo.
- */
-bool DetectSysfsCPUTopology(
+void BuildFallbackTopology(
+    unsigned int threadCount,
     std::vector<CPUInfo>& cpus
 )
 {
-    namespace fs = std::filesystem;
-
-    const fs::path cpuRoot =
-        "/sys/devices/system/cpu";
-
-
-    if (!fs::exists(cpuRoot))
-    {
-        return false;
-    }
-
-
-    struct CoreKey
-    {
-        unsigned int package;
-        unsigned int core;
-
-        bool operator<(const CoreKey& other) const
-        {
-            if (package != other.package)
-            {
-                return package < other.package;
-            }
-
-            return core < other.core;
-        }
-    };
-
-
-    std::map<unsigned int, CPUInfo> packages;
-
-    std::map<
-        CoreKey,
-        std::vector<unsigned int>
-    > coreThreads;
-
-
-    for (const auto& entry :
-         fs::directory_iterator(cpuRoot))
-    {
-        const std::string filename =
-            entry.path().filename().string();
-
-
-        if (filename.rfind("cpu", 0) != 0)
-        {
-            continue;
-        }
-
-
-        const std::string number =
-            filename.substr(3);
-
-
-        if (number.empty() ||
-            !std::all_of(
-                number.begin(),
-                number.end(),
-                [](char c)
-                {
-                    return c >= '0' && c <= '9';
-                }))
-        {
-            continue;
-        }
-
-
-        const unsigned int logicalThread =
-            static_cast<unsigned int>(
-                std::stoul(number)
-            );
-
-
-        unsigned int packageId = 0;
-        unsigned int coreId = logicalThread;
-
-
-        std::string value;
-
-
-        const fs::path packagePath =
-            entry.path() /
-            "topology/physical_package_id";
-
-
-        if (ReadTextFile(
-                packagePath.string(),
-                value))
-        {
-            packageId =
-                static_cast<unsigned int>(
-                    std::stoul(value)
-                );
-        }
-
-
-        const fs::path corePath =
-            entry.path() /
-            "topology/core_id";
-
-
-        if (ReadTextFile(
-                corePath.string(),
-                value))
-        {
-            coreId =
-                static_cast<unsigned int>(
-                    std::stoul(value)
-                );
-        }
-
-
-        coreThreads[
-            CoreKey{packageId, coreId}
-        ].push_back(logicalThread);
-    }
-
-
-    if (coreThreads.empty())
-    {
-        return false;
-    }
-
-
-    const std::string cpuName =
-        DetectCPUName();
-
-
-    for (const auto& [key, threads] :
-         coreThreads)
-    {
-        auto& cpu =
-            packages[key.package];
-
-
-        cpu.packageId =
-            key.package;
-
-
-        cpu.name =
-            cpuName;
-
-
-        CPUCoreInfo core;
-
-        core.coreId =
-            key.core;
-
-
-        for (unsigned int logicalThread :
-             threads)
-        {
-            CPUThreadInfo thread;
-
-            thread.logicalThread =
-                logicalThread;
-
-
-            core.threads.push_back(thread);
-
-            ++cpu.logicalThreads;
-        }
-
-
-        cpu.cores.push_back(core);
-
-        ++cpu.physicalCores;
-    }
-
-
-    for (auto& [packageId, cpu] :
-         packages)
-    {
-        cpu.packageId = packageId;
-
-        cpus.push_back(cpu);
-    }
-
-
-    return !cpus.empty();
-}
-
-
-/*
- * std::thread fallback.
- */
-void DetectCPUFallback(
-    std::vector<CPUInfo>& cpus
-)
-{
-    const unsigned int threadCount =
-        std::max(
-            1u,
-            std::thread::hardware_concurrency()
-        );
-
-
     CPUInfo cpu;
 
-    cpu.name =
-        DetectCPUName();
-
-
+    cpu.name = DetectCPUName();
     cpu.packageId = 0;
+    cpu.logicalThreads = threadCount;
+    cpu.physicalCores = threadCount;   // unknown split: assume 1:1
 
-    cpu.physicalCores =
-        threadCount;
-
-    cpu.logicalThreads =
-        threadCount;
-
-
-    for (unsigned int i = 0;
-         i < threadCount;
-         ++i)
+    for (unsigned int i = 0; i < threadCount; ++i)
     {
         CPUCoreInfo core;
-
         core.coreId = i;
 
-
         CPUThreadInfo thread;
-
         thread.logicalThread = i;
 
-
         core.threads.push_back(thread);
-
         cpu.cores.push_back(core);
     }
-
 
     cpus.push_back(cpu);
 }
 
+} // namespace
 
-/*
- * CPU detection.
- */
-void DetectCPUs(
-    std::vector<CPUInfo>& cpus
-)
-{
-    std::vector<LinuxCPURecord> records;
 
-
-    if (ReadCPUInfo(records))
-    {
-        struct PackageBuilder
-        {
-            CPUInfo cpu;
-
-            std::unordered_map<
-                unsigned int,
-                std::vector<unsigned int>
-            > coreThreads;
-        };
-
-
-        std::unordered_map<
-            unsigned int,
-            PackageBuilder
-        > packages;
-
-
-        for (const auto& record : records)
-        {
-            auto& package =
-                packages[
-                    record.physicalPackage
-                ];
-
-
-            package.cpu.packageId =
-                record.physicalPackage;
-
-
-            if (package.cpu.name.empty())
-            {
-                package.cpu.name =
-                    record.modelName;
-            }
-
-
-            package.coreThreads[
-                record.coreId
-            ].push_back(
-                record.processor
-            );
-        }
-
-
-        for (auto& [packageId, package] :
-             packages)
-        {
-            package.cpu.packageId =
-                packageId;
-
-
-            package.cpu.physicalCores =
-                static_cast<unsigned int>(
-                    package.coreThreads.size()
-                );
-
-
-            package.cpu.logicalThreads = 0;
-
-
-            for (const auto& [coreId, threads] :
-                 package.coreThreads)
-            {
-                CPUCoreInfo core;
-
-                core.coreId =
-                    coreId;
-
-
-                for (unsigned int logicalThread :
-                     threads)
-                {
-                    CPUThreadInfo thread;
-
-                    thread.logicalThread =
-                        logicalThread;
-
-
-                    core.threads.push_back(thread);
-
-                    ++package.cpu.logicalThreads;
-                }
-
-
-                package.cpu.cores.push_back(core);
-            }
-
-
-            cpus.push_back(package.cpu);
-        }
-
-
-        if (!cpus.empty())
-        {
-            return;
-        }
-    }
-
-
-    Log("Unable to read /proc/cpuinfo");
-    Log("Using sysfs CPU topology fallback");
-
-
-    if (DetectSysfsCPUTopology(cpus))
-    {
-        Log("Sysfs CPU topology detected");
-        return;
-    }
-
-
-    Log("Using std::thread CPU fallback");
-
-    DetectCPUFallback(cpus);
-
-    Log("CPU fallback topology created");
-}
-
-
-/*
- * GPU detection.
- */
-void DetectGPUs(
-    std::vector<GPUInfo>& gpus
-)
-{
-    Log("Detecting OpenCL GPUs...");
-
-
-    if (!OpenCLManager::Initialize())
-    {
-        Log("OpenCL GPU detection failed");
-        return;
-    }
-
-
-    GPUInfo gpu;
-
-
-    gpu.name =
-        OpenCLManager::GetDeviceName();
-
-
-    gpu.openclSupported =
-        true;
-
-
-    gpu.vulkanSupported =
-        false;
-
-
-    /*
-     * Intel UHD Graphics 630 is integrated.
-     */
-    const std::string name =
-        gpu.name;
-
-
-    gpu.integrated =
-        name.find("Intel") != std::string::npos &&
-        name.find("UHD") != std::string::npos;
-
-
-    gpu.computeUnits = 0;
-    gpu.globalMemory = 0;
-
-
-    /*
-     * OpenCLManager currently exposes only the device name.
-     * Keep these values at zero until we add proper device
-     * information queries to OpenCLManager.
-     */
-
-
-    gpus.push_back(gpu);
-
-
-    std::string message =
-        "OpenCL GPU detected: " +
-        gpu.name;
-
-
-    Log(message.c_str());
-
-
-    Log("OpenCL GPU topology detection complete");
-}
-
-}
-
-
-/*
- * Public HardwareManager API.
- */
 bool HardwareManager::Initialize()
 {
     Log("Detecting hardware");
-
 
     cpus.clear();
     gpus.clear();
 
 
-    DetectCPUs(cpus);
+#if !defined(_WIN32)
+
+    /*
+     * Linux: prefer real /proc/cpuinfo topology.
+     */
+    {
+        std::ifstream file("/proc/cpuinfo");
+
+        if (file.is_open())
+        {
+            struct Record
+            {
+                unsigned int processor = 0;
+                unsigned int physicalPackage = 0;
+                unsigned int coreId = 0;
+                std::string modelName;
+            };
+
+            std::vector<Record> records;
+
+            Record current;
+            bool hasProcessor = false;
+
+            std::string line;
+
+            auto commit =
+                [&]()
+                {
+                    if (hasProcessor)
+                    {
+                        records.push_back(current);
+                    }
+
+                    current = Record{};
+                    hasProcessor = false;
+                };
+
+
+            while (std::getline(file, line))
+            {
+                if (line.empty())
+                {
+                    commit();
+                    continue;
+                }
+
+                const auto separator = line.find(':');
+
+                if (separator == std::string::npos)
+                {
+                    continue;
+                }
+
+                const std::string key =
+                    line.substr(0, separator);
+
+                std::string value =
+                    line.substr(separator + 1);
+
+                while (!value.empty() && value.front() == ' ')
+                {
+                    value.erase(value.begin());
+                }
+
+
+                try
+                {
+                    if (key == "processor")
+                    {
+                        current.processor =
+                            static_cast<unsigned int>(std::stoul(value));
+                        hasProcessor = true;
+                    }
+                    else if (key == "physical id")
+                    {
+                        current.physicalPackage =
+                            static_cast<unsigned int>(std::stoul(value));
+                    }
+                    else if (key == "core id")
+                    {
+                        current.coreId =
+                            static_cast<unsigned int>(std::stoul(value));
+                    }
+                    else if (key == "model name")
+                    {
+                        current.modelName = value;
+                    }
+                }
+                catch (...)
+                {
+                    // malformed numeric field: ignore line safely
+                }
+            }
+
+            commit();
+
+
+            std::map<unsigned int,
+                std::map<unsigned int, std::vector<unsigned int>>> packages;
+
+            for (const auto& record : records)
+            {
+                packages[record.physicalPackage][record.coreId]
+                    .push_back(record.processor);
+
+                if (cpus.empty() ||
+                    cpus.back().packageId != record.physicalPackage ||
+                    cpus.back().name.empty())
+                {
+                    if (cpus.empty() ||
+                        cpus.back().packageId != record.physicalPackage)
+                    {
+                        CPUInfo info;
+                        info.packageId = record.physicalPackage;
+                        info.name = record.modelName;
+                        cpus.push_back(info);
+                    }
+                    else
+                    {
+                        cpus.back().name = record.modelName;
+                    }
+                }
+            }
+
+
+            for (auto& [packageId, cores] : packages)
+            {
+                CPUInfo* target = nullptr;
+
+                for (auto& cpu : cpus)
+                {
+                    if (cpu.packageId == packageId)
+                    {
+                        target = &cpu;
+                        break;
+                    }
+                }
+
+                if (!target)
+                {
+                    CPUInfo info;
+                    info.packageId = packageId;
+                    cpus.push_back(info);
+                    target = &cpus.back();
+                }
+
+
+                for (auto& [coreId, threads] : cores)
+                {
+                    CPUCoreInfo core;
+                    core.coreId = coreId;
+
+                    for (unsigned int t : threads)
+                    {
+                        CPUThreadInfo thread;
+                        thread.logicalThread = t;
+                        core.threads.push_back(thread);
+                    }
+
+                    target->cores.push_back(core);
+                }
+
+
+                target->physicalCores =
+                    static_cast<unsigned int>(target->cores.size());
+
+                target->logicalThreads = 0;
+
+                for (const auto& core : target->cores)
+                {
+                    target->logicalThreads +=
+                        static_cast<unsigned int>(core.threads.size());
+                }
+            }
+        }
+    }
+
+#endif   // !_WIN32
 
 
     if (cpus.empty())
     {
-        Log("No CPU topology detected");
+        /*
+         * Portable fallback (always used on Windows):
+         * logical thread count from the standard library and the
+         * cpuid brand string where available.
+         */
+        const unsigned int threads =
+            std::max(
+                1u,
+                std::thread::hardware_concurrency());
+
+        BuildFallbackTopology(threads, cpus);
+
+        Log("CPU topology: fallback mode");
     }
-    else
+
+
+#if defined(_WIN32)
+
+    /*
+     * On Windows, upgrade the name in the fallback topology using cpuid.
+     */
+    if (!cpus.empty() &&
+        (cpus.front().name.empty() || cpus.front().name == "Unknown CPU"))
     {
-        Log("CPU topology detection complete");
+        cpus.front().name = DetectCPUNameWindows();
     }
 
+#endif
 
-    DetectGPUs(gpus);
+
+    /*
+     * GPUs: report every device DeviceRuntime enumerated.
+     * This class never initializes OpenCL itself - LTE::Initialize()
+     * owns that lifecycle.
+     */
+    if (DeviceRuntime::IsInitialized())
+    {
+        const int count = DeviceRuntime::DeviceCount();
+
+        for (int i = 0; i < count; ++i)
+        {
+            const OpenCLDeviceInfo& device = DeviceRuntime::GetDeviceInfo(i);
+
+            if (device.name.empty())
+            {
+                continue;
+            }
+
+            GPUInfo gpu;
+            gpu.name = device.name;
+            gpu.openclSupported = true;
+            gpu.computeUnits = device.computeUnits;
+            gpu.globalMemory = device.globalMemory;
+            gpu.integrated = device.integrated;
+
+            gpus.push_back(gpu);
+
+            const std::string message =
+                "GPU detected (" + std::to_string(i) + "): "
+                + device.name + ", "
+                + std::to_string(device.computeUnits) + " CUs";
+
+            Log(message.c_str());
+        }
+    }
+
+    if (gpus.empty())
+    {
+        Log("No OpenCL GPU information available");
+    }
 
 
     return !cpus.empty();
@@ -724,12 +510,10 @@ HardwareManager::GetTotalPhysicalCores() const
 {
     unsigned int total = 0;
 
-
     for (const auto& cpu : cpus)
     {
         total += cpu.physicalCores;
     }
-
 
     return total;
 }
@@ -740,14 +524,12 @@ HardwareManager::GetTotalLogicalThreads() const
 {
     unsigned int total = 0;
 
-
     for (const auto& cpu : cpus)
     {
         total += cpu.logicalThreads;
     }
 
-
     return total;
 }
 
-}
+} // namespace LTE

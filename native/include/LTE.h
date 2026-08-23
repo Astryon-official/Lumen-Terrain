@@ -1,5 +1,13 @@
 #pragma once
 
+/*
+ * LTE native core lifecycle.
+ *
+ * Ownership rule (fixed in 2.0.0):
+ *   LTE::Initialize() owns exactly one OpenCL initialization.
+ *   Hardware detection utilities never initialize OpenCL themselves.
+ */
+
 namespace LTE
 {
 
@@ -10,11 +18,6 @@ void Shutdown();
 bool IsInitialized();
 
 const char* GetVersion();
-
-void ProcessChunk(
-    int x,
-    int z
-);
 
 long RunGPUBenchmark();
 

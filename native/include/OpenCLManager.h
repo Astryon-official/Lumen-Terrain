@@ -1,11 +1,19 @@
 #pragma once
 
-#include <CL/cl.h>
-#include <string>
+#include "DeviceRuntime.h"
 
 namespace LTE
 {
 
+/*
+ * Legacy single-device manager (kept for the native test binary).
+ *
+ * Production scheduling uses DeviceRuntime, which enumerates and owns
+ * every device independently. This thin adapter forwards to device 0
+ * of DeviceRuntime so existing callers keep working unchanged.
+ *
+ * OpenCLDeviceInfo is defined once, in DeviceRuntime.h.
+ */
 class OpenCLManager
 {
 public:
@@ -15,23 +23,11 @@ public:
 
     static bool IsInitialized();
 
-    static std::string GetDeviceName();
-
-    static long RunBenchmark();
+    static const OpenCLDeviceInfo& GetDeviceInfo();
 
     static cl_context GetContext();
     static cl_command_queue GetQueue();
     static cl_device_id GetDevice();
-
-private:
-
-    static cl_platform_id platform;
-    static cl_device_id device;
-
-    static cl_context context;
-    static cl_command_queue queue;
-
-    static bool initialized;
 };
 
-}
+} // namespace LTE

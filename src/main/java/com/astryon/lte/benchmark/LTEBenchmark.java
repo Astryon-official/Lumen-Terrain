@@ -6,9 +6,20 @@ import com.astryon.lte.core.BackendSelector;
 import com.astryon.lte.core.HardwareProfile;
 import com.astryon.lte.core.HardwareProfileManager;
 
+/*
+ * Hardware benchmark + backend selection.
+ *
+ * Both benchmarks run the IDENTICAL terrain workload natively
+ * (CPU reference vs OpenCL), so scores are directly comparable on
+ * any machine. Results are cached per GPU device name; a hardware
+ * change invalidates the cache automatically.
+ */
 public class LTEBenchmark {
 
-    public static Backend selectedBackend;
+    public static Backend selectedBackend = Backend.CPU;
+
+    public static long cpuScore;
+    public static long gpuScore;
 
     public static void run() {
 
@@ -16,23 +27,35 @@ public class LTEBenchmark {
             HardwareProfileManager.load();
 
 
-        if(profile != null) {
+        if (profile != null) {
 
             System.out.println(
                 "[LTE] Using cached hardware profile"
             );
 
-            selectedBackend =
-                Backend.valueOf(profile.backend);
+            try {
+                selectedBackend =
+                    Backend.valueOf(profile.backend);
+            } catch (Exception e) {
+                selectedBackend = Backend.CPU;
+            }
 
+
+            cpuScore = profile.cpuScore;
+            gpuScore = profile.gpuScore;
+
+
+            System.out.println(
+                "[LTE] Cached CPU score: " + cpuScore
+            );
+
+            System.out.println(
+                "[LTE] Cached GPU score: " + gpuScore
+            );
 
             System.out.println(
                 "[LTE] Backend: "
                 + selectedBackend
-            );
-
-            System.out.println(
-                "[LTE] Skipping benchmark"
             );
 
             return;
@@ -49,10 +72,12 @@ public class LTEBenchmark {
         );
 
 
-        long cpuScore = 1964543;
-
-        long gpuScore =
-            LTENative.runGPUBenchmark();
+        /*
+         * Identical native workload for both backends.
+         * 0 means "backend unavailable" and loses selection.
+         */
+        cpuScore = LTENative.runCPUBenchmark();
+        gpuScore = LTENative.runGPUBenchmark();
 
 
         System.out.println(
@@ -73,10 +98,14 @@ public class LTEBenchmark {
             );
 
 
-        System.out.println(
-            "[LTE] Selected backend: "
-            + selectedBackend
-        );
+        /*
+         * Profile cache identity: every enumerated device's name, so
+         * adding/removing a GPU invalidates cached scores.
+         */
+        String deviceName =
+            com.astryon.lte.gpu.DeviceScheduler.usableDeviceCount() > 0
+                ? com.astryon.lte.gpu.DeviceScheduler.describeDevices()
+                : "None";
 
 
         HardwareProfile newProfile =
@@ -84,7 +113,7 @@ public class LTEBenchmark {
                 cpuScore,
                 gpuScore,
                 selectedBackend.name(),
-                "Detected GPU"
+                deviceName
             );
 
 

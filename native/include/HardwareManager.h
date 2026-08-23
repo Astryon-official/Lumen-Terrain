@@ -21,10 +21,10 @@ struct CPUInfo
 {
     std::string name;
 
-    unsigned int packageId;
+    unsigned int packageId = 0;
 
-    unsigned int physicalCores;
-    unsigned int logicalThreads;
+    unsigned int physicalCores = 0;
+    unsigned int logicalThreads = 0;
 
     std::vector<CPUCoreInfo> cores;
 };
@@ -33,14 +33,13 @@ struct GPUInfo
 {
     std::string name;
 
-    bool openclSupported;
-    bool vulkanSupported;
+    bool openclSupported = false;
 
-    bool integrated;
+    bool integrated = false;
 
-    unsigned int computeUnits;
+    unsigned int computeUnits = 0;
 
-    unsigned long long globalMemory;
+    unsigned long long globalMemory = 0;
 };
 
 class HardwareManager
@@ -64,4 +63,4 @@ private:
 
 };
 
-}
+} // namespace LTE

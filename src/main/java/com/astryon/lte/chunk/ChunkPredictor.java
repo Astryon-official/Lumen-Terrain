@@ -1,7 +1,15 @@
 package com.astryon.lte.chunk;
 
+import com.astryon.lte.chunk.LTEChunkData;
 import net.minecraft.server.level.ServerPlayer;
 
+/*
+ * Per-tick player tracking.
+ *
+ * Marks the chunk each player stands in as "wanted" so the pipeline
+ * prioritizes it. Actual prediction of future chunks is handled by
+ * the vanilla world-gen system; LTE reacts to what it observes.
+ */
 public class ChunkPredictor {
 
 
@@ -12,30 +20,18 @@ public class ChunkPredictor {
         int chunkZ = (int) player.getZ() >> 4;
 
 
-	for (int x = -4; x <= 4; x++) {
+        /*
+         * The player's own chunk is always wanted immediately.
+         */
+        if (!CompletedChunkCache.isCompleted(chunkX, chunkZ)
+                && !ChunkQueue.contains(chunkX, chunkZ)) {
 
-    	for (int z = -4; z <= 4; z++) {
-
-
-                int predictedX = chunkX + x;
-                int predictedZ = chunkZ + z;
-
-
-                if (CompletedChunkCache.isCompleted(predictedX, predictedZ)) {
-                    continue;
-                }
-
-
-                if (!ChunkQueue.contains(predictedX, predictedZ)) {
-
-                    ChunkQueue.addChunk(predictedX, predictedZ);
-
-                }
-
-            }
-
+            ChunkQueue.addChunk(
+                chunkX,
+                chunkZ,
+                new LTEChunkData(chunkX, chunkZ)
+            );
         }
 
     }
-
 }

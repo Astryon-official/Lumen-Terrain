@@ -36,3 +36,6 @@ backup/
 run/
 eula.txt
 .cptr/
+
+# LTE per-user native runtime directory (extracted binaries)
+lte-native/

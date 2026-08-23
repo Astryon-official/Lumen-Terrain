@@ -1,9 +1,9 @@
 #include "LTE.h"
 
 #include "Logger.h"
-#include "HardwareManager.h"
-#include "OpenCLManager.h"
+#include "DeviceRuntime.h"
 #include "OpenCLCompute.h"
+#include "CpuCompute.h"
 
 namespace LTE
 {
@@ -13,33 +13,42 @@ static bool initialized = false;
 
 /*
  * Initialize LTE native core.
+ *
+ * OpenCL device enumeration + per-device contexts happen exactly once,
+ * here. Every usable non-CPU device across every OpenCL platform gets
+ * its own context/queue so devices can run truly concurrently.
+ *
+ * Failure is never fatal: Java degrades to the CPU backend.
  */
 bool Initialize()
 {
-    Log("Initializing LTE Core");
-
-
-    /*
-     * Detect CPU and GPU hardware.
-     */
-    HardwareManager hardware;
-
-    if (!hardware.Initialize())
+    if (initialized)
     {
-        Log("Hardware detection failed");
+        return true;
     }
 
+    Log("Initializing LTE native core");
 
-    /*
-     * Initialize OpenCL.
-     */
-    if (!OpenCLManager::Initialize())
+
+    const int devices = DeviceRuntime::Initialize();
+
+    if (devices <= 0)
     {
-        Log("OpenCL initialization failed");
+        /*
+         * Valid configuration (headless servers, no ICD, CPU-only):
+         * the mod keeps running with Java/native CPU processing.
+         */
+        Log("OpenCL unavailable - GPU backend disabled");
     }
     else
     {
-        Log("OpenCL initialized successfully");
+        for (int i = 0; i < devices; ++i)
+        {
+            const OpenCLDeviceInfo& info = DeviceRuntime::GetDeviceInfo(i);
+
+            Log(("GPU " + std::to_string(i) + ": "
+                 + info.name).c_str());
+        }
     }
 
 
@@ -49,93 +58,54 @@ bool Initialize()
 }
 
 
-/*
- * Shutdown LTE.
- */
 void Shutdown()
 {
-    Log("Shutting down LTE");
+    if (!initialized)
+    {
+        return;
+    }
 
-    OpenCLManager::Shutdown();
+    Log("Shutting down LTE native core");
+
+    OpenCLCompute::ReleaseResources();
+    DeviceRuntime::Shutdown();
 
     initialized = false;
 }
 
 
-/*
- * Check LTE state.
- */
 bool IsInitialized()
 {
     return initialized;
 }
 
 
-/*
- * LTE native version.
- */
 const char* GetVersion()
 {
-    return "2.0.0";
+    return "2.1.0";
 }
 
 
-/*
- * Process a Minecraft chunk using
- * the native GPU terrain backend.
- *
- * This legacy entry point only has the
- * chunk coordinates available.
- */
-void ProcessChunk(
-    int x,
-    int z
-)
-{
-    Log("GPU chunk received");
-
-
-    /*
-     * The real terrain-processing JNI path
-     * uses OpenCLCompute::ProcessTerrain().
-     *
-     * This function remains as the simple
-     * coordinate-only native entry point.
-     */
-    bool success =
-        OpenCLCompute::ProcessChunk(
-            x,
-            z
-        );
-
-
-    if (!success)
-    {
-        Log("GPU chunk processing failed");
-    }
-    else
-    {
-        Log("GPU chunk processing successful");
-    }
-}
-
-
-/*
- * Run GPU benchmark.
- */
 long RunGPUBenchmark()
 {
-    Log("Running GPU benchmark...");
+    if (!DeviceRuntime::IsInitialized())
+    {
+        return 0;   // no usable OpenCL device
+    }
 
+    long total = 0;
 
-    long score =
-        OpenCLManager::RunBenchmark();
+    for (int i = 0; i < DeviceRuntime::DeviceCount(); ++i)
+    {
+        total += DeviceRuntime::RunBenchmark(i);
+    }
 
+    if (total > 0)
+    {
+        Log("GPU benchmark complete");
+    }
 
-    Log("GPU benchmark complete");
-
-
-    return score;
+    return total;
 }
 
-}
+} // namespace LTE

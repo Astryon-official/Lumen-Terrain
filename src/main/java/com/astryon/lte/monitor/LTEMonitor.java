@@ -1,45 +1,56 @@
 package com.astryon.lte.monitor;
 
-import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 
-public class LTEMonitor {
+/*
+ * Optional performance log (logs/lumen-terrain-engine/performance.log).
+ *
+ * Never called automatically: only diagnostics commands or explicit
+ * verbose sessions should invoke it. Appends one line per call using
+ * NIO; failures are swallowed - monitoring must never break the game.
+ */
+public final class LTEMonitor {
 
+    private static final Path LOG_FILE =
+            Path.of("logs", "lumen-terrain-engine",
+                    "performance.log");
 
-    private static final File LOG_FILE =
-            new File("logs/lumen-terrain-engine/performance.log");
-
+    private LTEMonitor() {
+    }
 
     public static void writeStats(int queueSize) {
 
         try {
 
-            LOG_FILE.getParentFile().mkdirs();
+            Files.createDirectories(LOG_FILE.getParent());
 
-
-            FileWriter writer = new FileWriter(LOG_FILE, true);
-
-
-            writer.write(
-                    "[LTE Stats] "
+            String line = "[LTE Stats] "
                     + "Chunks: " + LTEStats.getChunksCompleted()
                     + " | Queue: " + queueSize
-                    + " | Avg Time: "
-                    + LTEStats.getAverageTime()
-                    + "ms\n"
-            );
+                    + " | Avg: "
+                    + LTEStats.getAverageTimeNanos() / 1_000_000.0
+                    + "ms"
+                    + " | GPU: " + LTEStats.GPU_CHUNKS.get()
+                    + " | CPU: " + LTEStats.CPU_CHUNKS.get()
+                    + System.lineSeparator();
 
-
-            writer.close();
-
+            Files.writeString(
+                LOG_FILE,
+                line,
+                StandardCharsets.UTF_8,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.APPEND);
 
         } catch (IOException e) {
 
-            e.printStackTrace();
-
+            // Monitoring must never break the server.
+            System.out.println(
+                "[LTE] Could not write performance log: "
+                + e.getMessage());
         }
-
     }
-
 }

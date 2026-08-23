@@ -35,27 +35,34 @@ public class NoiseBasedChunkGeneratorMixin {
         int z = chunk.getPos().z();
 
 
+        boolean verbose =
+            com.astryon.lte.config.LTEConfig.verbose;
+
+
         if (CompletedChunkCache.isCompleted(x, z)) {
 
-            System.out.println(
-                "[LTE] Skipping completed chunk: "
-                + x + ", " + z
-            );
+            if (verbose) {
+
+                System.out.println(
+                    "[LTE] Skipping completed chunk: "
+                    + x + ", " + z
+                );
+            }
 
             return;
         }
 
 
-        System.out.println(
-            "[LTE] REAL TERRAIN HOOK AFTER SURFACE: "
-            + x + ", " + z
-        );
+        if (verbose) {
+
+            System.out.println(
+                "[LTE] Hook after surface build: "
+                + x + ", " + z
+            );
+        }
 
 
         TerrainAnalyzer.analyze(chunk);
-
-
-        ChunkQueue.addChunk(x, z);
 
     }
 }

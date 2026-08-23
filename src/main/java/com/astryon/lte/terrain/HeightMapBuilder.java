@@ -2,56 +2,52 @@ package com.astryon.lte.terrain;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.chunk.ChunkAccess;
-import net.minecraft.world.level.block.state.BlockState;
 
+/*
+ * Extracts the 16x16 surface heightmap from a world chunk.
+ * Index convention matches the native contract: index = z * 16 + x.
+ */
 public class HeightMapBuilder {
 
-    public static HeightMap build(ChunkAccess chunk) {
+    public static LTEHeightmap build(ChunkAccess chunk) {
 
         int minHeight = Integer.MAX_VALUE;
         int maxHeight = Integer.MIN_VALUE;
 
-        double totalHeight = 0;
-        int samples = 0;
+        long totalHeight = 0;
 
-        int[][] heights = new int[16][16];
+        int[] heights = new int[256];
 
         int startX = chunk.getPos().getMinBlockX();
         int startZ = chunk.getPos().getMinBlockZ();
 
 
-        for (int x = 0; x < 16; x++) {
+        for (int z = 0; z < 16; z++) {
 
-            for (int z = 0; z < 16; z++) {
+            for (int x = 0; x < 16; x++) {
 
-                int surfaceY = findSurface(
-                    chunk,
-                    startX + x,
-                    startZ + z
-                );
+                int surfaceY =
+                    findSurface(
+                        chunk,
+                        startX + x,
+                        startZ + z
+                    );
 
-                heights[x][z] = surfaceY;
+                heights[z * 16 + x] = surfaceY;
 
                 minHeight = Math.min(minHeight, surfaceY);
                 maxHeight = Math.max(maxHeight, surfaceY);
 
                 totalHeight += surfaceY;
-                samples++;
             }
         }
 
 
-        double average = totalHeight / samples;
-
-        double variation = maxHeight - minHeight;
-
-
-        return new HeightMap(
+        return new LTEHeightmap(
             heights,
             minHeight,
             maxHeight,
-            average,
-            variation
+            totalHeight / 256.0
         );
     }
 
@@ -67,15 +63,12 @@ public class HeightMapBuilder {
 
         for (int y = top; y >= -64; y--) {
 
-            BlockState state =
-                chunk.getBlockState(
-                    new BlockPos(x, y, z)
-                );
+            if (!chunk.getBlockState(
+                    new BlockPos(x, y, z)).isAir()) {
 
-
-            if (!state.isAir()) {
                 return y;
             }
+
         }
 
 
