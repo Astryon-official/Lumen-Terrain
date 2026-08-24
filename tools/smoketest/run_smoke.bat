@@ -3,7 +3,7 @@ rem LTE standalone smoke test runner.
 rem Usage: tools\smoketest\run_smoke.bat [path\to\mod.jar]
 setlocal
 set JAR=%~1
-if "%JAR%"=="" set JAR=build\libs\lumen-terrain-engine-2.1.0.jar
+if "%JAR%"=="" set JAR=build\libs\lumen-terrain-engine-2.0.0.jar
 
 if not exist "%JAR%" (
     echo JAR not found: %JAR%

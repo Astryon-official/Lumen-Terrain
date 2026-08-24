@@ -70,8 +70,8 @@ public class LTESmokeTest {
          * 3. Native reporting.
          */
         String version = LTENative.getNativeVersion();
-        check("2.1.0".equals(version),
-            "version reports 2.1.0 (got '" + version + "')");
+        check("2.0.0".equals(version),
+            "version reports 2.0.0 (got '" + version + "')");
 
         boolean gpu = LTENative.isGPURuntimeAvailable();
         check(true, "isGPURuntimeAvailable()=" + gpu);

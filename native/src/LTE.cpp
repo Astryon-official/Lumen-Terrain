@@ -82,7 +82,7 @@ bool IsInitialized()
 
 const char* GetVersion()
 {
-    return "2.1.0";
+    return "2.0.0";
 }
 
 

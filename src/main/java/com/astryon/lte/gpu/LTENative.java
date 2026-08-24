@@ -44,7 +44,7 @@ public final class LTENative {
 
             @Override
             public String version() {
-                return "2.1.0";
+                return "2.0.0";
             }
 
             @Override
@@ -89,7 +89,7 @@ public final class LTENative {
     /** Device name of the selected OpenCL device, "" if unavailable. */
     public static native String getGPUDeviceName();
 
-    /** Native core version string, e.g. "2.1.0". */
+    /** Native core version string, e.g. "2.0.0". */
     public static native String getNativeVersion();
 
     /**

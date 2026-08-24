@@ -12,7 +12,7 @@ public class LumenTerrainEngine implements ModInitializer {
 
     public static final String MOD_ID = "lumenterrain";
 
-    public static final String VERSION = "2.1.0";
+    public static final String VERSION = "2.0.0";
 
     private static com.astryon.lte.core.LTEWorkerPool workerPool;
 

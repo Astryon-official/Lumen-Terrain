@@ -59,8 +59,8 @@ Requirements: CMake ≥ 3.20, a JDK (JNI headers), and the vendored Khronos Open
 
 ```bat
 gradlew build
-tools\smoketest\run_smoke.bat   build\libs\lumen-terrain-engine-2.1.0.jar
-tools\stresstest\run_stress.bat build\libs\lumen-terrain-engine-2.1.0.jar
+tools\smoketest\run_smoke.bat   build\libs\lumen-terrain-engine-2.0.0.jar
+tools\stresstest\run_stress.bat build\libs\lumen-terrain-engine-2.0.0.jar
 ```
 
 * **Smoke test** — platform detection, extraction, load, initialization, per-device JNI processing, determinism across devices, invalid-input safety, shutdown.
