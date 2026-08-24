@@ -21,6 +21,9 @@ jobs:
         include:
           - id: windows-x86_64
             os: windows-latest
+          # Free hosted ARM64 Windows runner (public repos).
+          - id: windows-arm64
+            os: windows-11-arm
           - id: linux-x86_64
             os: ubuntu-latest
           # ARM64 where practical (GitHub now provides free arm runners for public repos)
@@ -126,8 +129,9 @@ jobs:
         run: |
           jar=$(ls build/libs/*.jar | grep -v sources | head -n1)
           echo "JAR: $jar"
-          unzip -l "$jar" | grep 'native/.*/lib' || {
+          unzip -l "$jar" | grep -E 'native/(windows|linux|macos)-(x86_64|arm64)/' || {
             echo "ERROR: no native binaries bundled"; exit 1; }
+          echo "Platform bundles found: $(unzip -l "$jar" | grep -cE 'native/(windows|linux|macos)-(x86_64|arm64)/(lib)?LumenTerrainEngine')"
 
       - uses: actions/upload-artifact@v4
         with:

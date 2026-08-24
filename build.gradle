@@ -67,6 +67,7 @@ def nativeStagingDir = layout.buildDirectory.dir("native-staging")
 
 def nativePlatforms = [
     [id: 'windows-x86_64', ext: 'dll'],
+    [id: 'windows-arm64',  ext: 'dll'],
     [id: 'linux-x86_64',   ext: 'so'],
     [id: 'linux-arm64',    ext: 'so'],
     [id: 'macos-x86_64',   ext: 'dylib'],

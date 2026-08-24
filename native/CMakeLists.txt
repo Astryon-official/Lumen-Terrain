@@ -16,19 +16,47 @@ add_compile_definitions(
 )
 
 #
-# OpenCL SDK resolution (LTE 2.0.0):
-#   1. System OpenCL SDK if installed.
-#   2. Vendored Khronos headers + import library generated from the
-#      installed OpenCL.dll loader (tools/make_opencl_def.ps1).
+# OpenCL SDK resolution (LTE 2.x):
+#   1. Pre-built import library at third_party/OpenCL.lib (local dev).
+#   2. MSVC (incl. ARM64 cross-builds): generate an architecture-correct
+#      import library from the vendored opencl.def using the toolset's
+#      own lib.exe. Extern "C" symbols are undecorated on X64 and ARM64,
+#      so one def file serves every architecture.
+#   3. Otherwise: system OpenCL SDK (Linux/macOS CI installs headers).
 #
 set(LTE_OPENCL_INCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/OpenCL-Headers")
-set(LTE_OPENCL_LIB "${CMAKE_CURRENT_SOURCE_DIR}/third_party/OpenCL.lib")
+set(LTE_OPENCL_LIB     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/OpenCL.lib")
+set(LTE_OPENCL_DEF     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/opencl.def")
+set(LTE_OPENCL_GENLIB  "${CMAKE_CURRENT_BINARY_DIR}/OpenCL.import.lib")
 
 if(EXISTS "${LTE_OPENCL_LIB}")
-    set(OpenCL_FOUND TRUE)
-    message(STATUS "LTE: using vendored OpenCL headers + import library")
+    message(STATUS "LTE: using prebuilt OpenCL import library")
+    set(LTE_OPENCL_LINK "${LTE_OPENCL_LIB}")
+elseif(MSVC AND EXISTS "${LTE_OPENCL_DEF}")
+    message(STATUS "LTE: generating OpenCL import library from opencl.def")
+    if(CMAKE_VS_PLATFORM_NAME MATCHES "[Aa][Rr][Mm]")
+        set(LTE_OPENCL_MACHINE "/machine:ARM64")
+    else()
+        set(LTE_OPENCL_MACHINE "/machine:X64")
+    endif()
+    get_filename_component(LTE_LIB_TOOL_HINT "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    find_program(LTE_LIB_TOOL NAMES lib.exe HINTS "${LTE_LIB_TOOL_HINT}")
+    if(NOT LTE_LIB_TOOL)
+        message(FATAL_ERROR "LTE: lib.exe not found next to ${CMAKE_CXX_COMPILER}")
+    endif()
+    add_custom_command(
+        OUTPUT "${LTE_OPENCL_GENLIB}"
+        COMMAND "${LTE_LIB_TOOL}" /nologo ${LTE_OPENCL_MACHINE}
+                /def:${LTE_OPENCL_DEF}
+                /out:${LTE_OPENCL_GENLIB}
+        DEPENDS "${LTE_OPENCL_DEF}"
+        COMMENT "LTE: lib.exe ${LTE_OPENCL_MACHINE} -> OpenCL import library"
+        VERBATIM)
+    add_custom_target(lte_opencl_import_lib DEPENDS "${LTE_OPENCL_GENLIB}")
+    set(LTE_OPENCL_LINK "${LTE_OPENCL_GENLIB}")
 else()
     find_package(OpenCL REQUIRED)
+    set(LTE_OPENCL_LINK OpenCL::OpenCL)
 endif()
 
 find_package(Java REQUIRED)
@@ -71,11 +99,10 @@ set_target_properties(LumenTerrainEngine PROPERTIES
     WINDOWS_EXPORT_ALL_SYMBOLS ON
 )
 
-if(TARGET OpenCL::OpenCL)
-    target_link_libraries(LumenTerrainEngine OpenCL::OpenCL)
-else()
-    target_link_libraries(LumenTerrainEngine "${LTE_OPENCL_LIB}")
+if(TARGET lte_opencl_import_lib)
+    add_dependencies(LumenTerrainEngine lte_opencl_import_lib)
 endif()
+target_link_libraries(LumenTerrainEngine PRIVATE "${LTE_OPENCL_LINK}")
 
 if(MSVC)
     target_compile_options(LumenTerrainEngine PRIVATE /W3)
