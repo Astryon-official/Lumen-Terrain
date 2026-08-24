@@ -56,6 +56,37 @@ long long NowMs()
         std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
+/*
+ * OpenCL 2.0 command-queue creation is resolved at runtime rather than
+ * linked directly: macOS ships an OpenCL 1.2-only system framework that
+ * never exports clCreateCommandQueueWithProperties, so a static reference
+ * would break the link there. Querying the entry point through the
+ * mandatory 1.2 extension-address API keeps one binary portable across
+ * 1.2-only platforms (Apple), ICD loaders (Windows/Linux), and 2.0+
+ * runtimes alike.
+ */
+using PFN_clCreateCommandQueueWithProperties = cl_command_queue(CL_API_CALL *)(
+    cl_context,
+    cl_device_id,
+    const cl_queue_properties*,
+    cl_int*);
+
+PFN_clCreateCommandQueueWithProperties GetQueue20EntryPoint(
+    cl_platform_id platform)
+{
+    if (auto* fn =
+            reinterpret_cast<PFN_clCreateCommandQueueWithProperties>(
+                clGetExtensionFunctionAddressForPlatform(
+                    platform, "clCreateCommandQueueWithProperties")))
+    {
+        return fn;
+    }
+
+    // Legacy pre-1.2 lookup as a secondary chance (some old ICDs).
+    return reinterpret_cast<PFN_clCreateCommandQueueWithProperties>(
+        clGetExtensionFunctionAddress("clCreateCommandQueueWithProperties"));
+}
+
 std::string GetPlatformString(cl_platform_id p, cl_platform_info which)
 {
     size_t size = 0;
@@ -402,22 +433,22 @@ int DeviceRuntime::Initialize()
                 continue;   // this device unusable; keep enumerating others
             }
 
-#ifdef CL_VERSION_2_0
-            const cl_queue_properties queueProps[] =
+            if (auto* queue20 = GetQueue20EntryPoint(platforms[p]))
             {
-                CL_QUEUE_PROPERTIES, 0,
-                0
-            };
+                const cl_queue_properties queueProps[] =
+                {
+                    CL_QUEUE_PROPERTIES, 0,
+                    0
+                };
 
-            dev.queue =
-                clCreateCommandQueueWithProperties(
-                    dev.context, devices[d], queueProps, &ctxResult);
+                dev.queue =
+                    queue20(dev.context, devices[d], queueProps, &ctxResult);
 
-            if (ctxResult != CL_SUCCESS || !dev.queue)
-            {
-                dev.queue = nullptr;
+                if (ctxResult != CL_SUCCESS || !dev.queue)
+                {
+                    dev.queue = nullptr;
+                }
             }
-#endif
 
             if (!dev.queue)
             {
