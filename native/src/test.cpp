@@ -4,6 +4,7 @@
 #include "CpuCompute.h"
 #include "Logger.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <string>

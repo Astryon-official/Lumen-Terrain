@@ -2,7 +2,19 @@
 #include "DeviceRuntime.h"
 #include "Logger.h"
 
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX            // keep std::min/std::max usable
+#endif
+#include <windows.h>     // registry CPU brand string (ARM64)
+#endif
+
 #include <algorithm>
+#include <fstream>       // Linux /proc parsing
+#include <map>           // Linux topology grouping
 #include <string>
 #include <thread>
 #include <vector>
@@ -28,47 +40,11 @@ namespace
 
 #if defined(_WIN32)
 
-void CpuId(
-    int function,
-    int subLeaf,
-    int regs[4]
-)
+/*
+ * Shared normalization: trim outer whitespace, collapse inner runs.
+ */
+std::string NormalizeCPUName(std::string value)
 {
-    __cpuid(reinterpret_cast<int*>(regs), function);
-}
-
-
-std::string DetectCPUNameWindows()
-{
-    int regs[4];
-
-    /*
-     * Brand string: 3 leaves of 16 bytes = 48 characters.
-     */
-    char brand[49] = {};
-
-    for (int i = 0; i < 3; ++i)
-    {
-        CpuId(0x80000002 + i, 0, regs);
-
-        for (int r = 0; r < 4; ++r)
-        {
-            const int base = i * 16 + r * 4;
-
-            brand[base + 0] = static_cast<char>((regs[r] >> 0) & 0xFF);
-            brand[base + 1] = static_cast<char>((regs[r] >> 8) & 0xFF);
-            brand[base + 2] = static_cast<char>((regs[r] >> 16) & 0xFF);
-            brand[base + 3] = static_cast<char>((regs[r] >> 24) & 0xFF);
-        }
-    }
-
-    brand[48] = '\0';
-
-    std::string value(brand);
-
-    /*
-     * Trim leading/trailing whitespace; collapse internal runs.
-     */
     const auto notSpace =
         [](unsigned char c)
         {
@@ -108,7 +84,95 @@ std::string DetectCPUNameWindows()
     return collapsed.empty() ? "Unknown CPU" : collapsed;
 }
 
-#else
+/*
+ * x86/x64: brand string via cpuid.
+ * ARM64 has no cpuid instruction - handled below.
+ */
+#if defined(_M_X64) || defined(_M_IX86) || \
+    defined(__x86_64__) || defined(__i386__)
+
+void CpuId(
+    int function,
+    int subLeaf,
+    int regs[4]
+)
+{
+    __cpuid(reinterpret_cast<int*>(regs), function);
+}
+
+
+std::string DetectCPUNameWindows()
+{
+    int regs[4];
+
+    /*
+     * Brand string: 3 leaves of 16 bytes = 48 characters.
+     */
+    char brand[49] = {};
+
+    for (int i = 0; i < 3; ++i)
+    {
+        CpuId(0x80000002 + i, 0, regs);
+
+        for (int r = 0; r < 4; ++r)
+        {
+            const int base = i * 16 + r * 4;
+
+            brand[base + 0] = static_cast<char>((regs[r] >> 0) & 0xFF);
+            brand[base + 1] = static_cast<char>((regs[r] >> 8) & 0xFF);
+            brand[base + 2] = static_cast<char>((regs[r] >> 16) & 0xFF);
+            brand[base + 3] = static_cast<char>((regs[r] >> 24) & 0xFF);
+        }
+    }
+
+    brand[48] = '\0';
+
+    return NormalizeCPUName(std::string(brand));
+}
+
+#else   // Windows ARM64: read the brand string from the registry.
+
+std::string DetectCPUNameWindows()
+{
+    HKEY key;
+
+    if (RegOpenKeyExA(
+            HKEY_LOCAL_MACHINE,
+            "HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0",
+            0,
+            KEY_READ,
+            &key) != ERROR_SUCCESS)
+    {
+        return "Unknown CPU";
+    }
+
+    char brand[256] = {};
+
+    DWORD size = static_cast<DWORD>(sizeof(brand) - 1);
+
+    DWORD type = REG_SZ;
+
+    const LSTATUS result = RegQueryValueExA(
+        key,
+        "ProcessorNameString",
+        nullptr,
+        &type,
+        reinterpret_cast<LPBYTE>(brand),
+        &size);
+
+    RegCloseKey(key);
+
+    if (result != ERROR_SUCCESS)
+    {
+        return "Unknown CPU";
+    }
+
+    return NormalizeCPUName(std::string(brand));
+}
+
+#endif  // x86/x64 vs ARM64
+
+#else   // !defined(_WIN32)
 
 bool ReadTextFile(const std::string& path, std::string& value)
 {
