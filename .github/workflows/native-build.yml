@@ -21,18 +21,25 @@ jobs:
         include:
           - id: windows-x86_64
             os: windows-latest
+            java: '25'
           # Free hosted ARM64 Windows runner (public repos).
+          # Temurin publishes no JDK 25 here yet; the native build only
+          # needs arch-correct JNI headers, so any modern JDK works.
           - id: windows-arm64
             os: windows-11-arm
+            java: '23'
           - id: linux-x86_64
             os: ubuntu-latest
-          # ARM64 where practical (GitHub now provides free arm runners for public repos)
+            java: '25'
           - id: linux-arm64
             os: ubuntu-24.04-arm
+            java: '25'
           - id: macos-arm64
             os: macos-latest          # Apple Silicon hosted
+            java: '25'
           - id: macos-x86_64
             os: macos-13              # last Intel hosted
+            java: '25'
 
     steps:
       - uses: actions/checkout@v4
@@ -40,7 +47,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '25'
+          java-version: ${{ matrix.java }}
 
       - name: Install OpenCL development files (Linux)
         if: runner.os == 'Linux'

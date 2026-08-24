@@ -29,7 +29,12 @@ set(LTE_OPENCL_LIB     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/OpenCL.lib")
 set(LTE_OPENCL_DEF     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/opencl.def")
 set(LTE_OPENCL_GENLIB  "${CMAKE_CURRENT_BINARY_DIR}/OpenCL.import.lib")
 
-if(EXISTS "${LTE_OPENCL_LIB}")
+#
+# NOTE: LTE_OPENCL_LIB / LTE_OPENCL_GENLIB are MSVC COFF import libraries.
+# They are only ever used on Windows; Unix platforms always link against
+# the system ICD loader (libOpenCL.so / libOpenCL.dylib).
+#
+if(MSVC AND EXISTS "${LTE_OPENCL_LIB}")
     message(STATUS "LTE: using prebuilt OpenCL import library")
     set(LTE_OPENCL_LINK "${LTE_OPENCL_LIB}")
 elseif(MSVC AND EXISTS "${LTE_OPENCL_DEF}")
