@@ -1,8 +1,8 @@
-# Lumen Terrain Engine
+# Lumen Terrain
 
 **Cross-platform GPU/CPU terrain processing for Minecraft (Fabric).**
 
-Lumen Terrain Engine (LTE) is a server-side Fabric mod that offloads terrain analysis and heightmap processing from the world-generation hot path to a native compute core, with automatic OpenCL GPU acceleration when available and a pure-Java CPU fallback everywhere else.
+Lumen Terrain (LTE) is a server-side Fabric mod that offloads terrain analysis and heightmap processing from the world-generation hot path to a native compute core, with automatic OpenCL GPU acceleration when available and a pure-Java CPU fallback everywhere else.
 
 ## Highlights
 
