@@ -37,9 +37,6 @@ jobs:
           - id: macos-arm64
             os: macos-latest          # Apple Silicon hosted
             java: '25'
-          - id: macos-x86_64
-            os: macos-15-intel        # last hosted Intel image (macos-13 retired; label supported until Aug 2027)
-            java: '25'
 
     steps:
       - uses: actions/checkout@v4
