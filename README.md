@@ -21,7 +21,6 @@ Lumen Terrain (LTE) is a server-side Fabric mod that offloads terrain analysis a
 | Linux x86-64 | ✅ bundled | CI build (GitHub Actions) |
 | Linux ARM64 | ✅ bundled | CI build (GitHub Actions) |
 | macOS ARM64 (Apple Silicon) | ✅ bundled | CI build (GitHub Actions) |
-| macOS x86-64 (Intel) | ✅ bundled | CI build (GitHub Actions) |
 
 On any host without an OpenCL runtime (very common on dedicated servers), LTE automatically uses its optimized CPU path — the mod remains fully functional.
 
