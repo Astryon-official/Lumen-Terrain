@@ -9,7 +9,7 @@ Lumen Terrain (LTE) is a server-side Fabric mod that offloads terrain analysis a
 * 🎛️ **Multi-GPU scheduling** — every usable OpenCL device across every platform is enumerated, benchmarked individually, and scheduled with benchmark-weighted rotation plus automatic failover. Unhealthy devices self-heal via cooldown probes; a device dying never interrupts generation.
 * ⚡ **Hybrid CPU/GPU routing** — in `auto` mode LTE routes work by queue pressure: near-empty queues take the low-latency Java CPU path, backlogs saturate every GPU. Explicit `backend=gpu|cpu` pins the choice.
 * 🧮 **Single-source-of-truth algorithm** — one header (`native/include/TerrainAlgorithm.h`) implements the terrain pipeline for both the CPU and GPU paths; native and JVM tests prove bit-exact equivalence across Intel iGPUs and NVIDIA discrete GPUs.
-* 🌍 **Cross-platform by design** — Windows x86-64/ARM64, Linux x86-64/ARM64, macOS x86-64/ARM64. The correct binary is bundled inside the mod JAR, extracted with CRC validation at startup, and loaded by absolute path. No manual DLL/SO/dylib installation, ever.
+* 🌍 **Cross-platform by design** — Windows x86-64, Linux x86-64/ARM64, macOS ARM64. The correct binary is bundled inside the mod JAR, extracted with CRC validation at startup, and loaded by absolute path. No manual DLL/SO/dylib installation, ever.
 * 🛟 **Never crashes your server** — missing binaries, unsupported platforms, OpenCL failures, and JNI errors all degrade gracefully to Java CPU processing / vanilla generation.
 
 ## Supported platforms
@@ -17,7 +17,6 @@ Lumen Terrain (LTE) is a server-side Fabric mod that offloads terrain analysis a
 | Platform | Native backend | Status |
 |---|---|---|
 | Windows x86-64 | ✅ bundled | built & tested (Intel UHD + RTX 2050) |
-| Windows ARM64 | ✅ bundled | CI build (GitHub Actions) |
 | Linux x86-64 | ✅ bundled | CI build (GitHub Actions) |
 | Linux ARM64 | ✅ bundled | CI build (GitHub Actions) |
 | macOS ARM64 (Apple Silicon) | ✅ bundled | CI build (GitHub Actions) |
